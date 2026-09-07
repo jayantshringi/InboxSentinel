@@ -1,0 +1,5 @@
+Label mapping:
+  0 = safe/ham
+  1 = spam/phishing
+
+Class distribution in full dataset: {1: 85780, 0: 79190}
