@@ -30,8 +30,6 @@ ENV/
 .venv
 
 # Model files (can be large)
-models/
-*.pkl
 *.joblib
 *.h5
 *.pb

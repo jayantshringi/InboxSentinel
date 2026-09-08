@@ -1,0 +1,12 @@
+{
+  "classes": [
+    "safe (label=0)",
+    "spam/phishing (label=1)"
+  ],
+  "accuracy": 0.9829665999878766,
+  "max_features": 5000,
+  "ngram_range": [
+    1,
+    2
+  ]
+}
