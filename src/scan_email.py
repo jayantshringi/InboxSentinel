@@ -7,6 +7,7 @@ Scan individual emails or batches of emails and classify them as:
 
 Usage:
   python src/scan_email.py --text "Free money now!!!"
+  python src/scan_email.py --email "Free money now!!!"
   python src/scan_email.py --file email.txt
   python src/scan_email.py --batch emails.txt
 """
@@ -156,7 +157,8 @@ def main():
         description="InboxSentinel - AI-Powered Email Spam Detection"
     )
     parser.add_argument(
-        "--text", type=str, default=None,
+        "--text", "--email", type=str, default=None,
+        dest="text",
         help="Email text to scan directly"
     )
     parser.add_argument(
