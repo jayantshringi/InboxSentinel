@@ -80,6 +80,13 @@ def scan_email(model, email_text):
     # Get probability of spam if relevant
     spam_prob = float(probabilities[1]) * 100 if len(probabilities) > 1 else 0.0
 
+    # Check if input is only an email address or lacks sufficient text
+    warning = None
+    if re.fullmatch(r"^[\w\.-]+@[\w\.-]+\.\w+$", email_text.strip()):
+        warning = "You provided an email address instead of the email message body. InboxSentinel is designed to scan email content/text."
+    elif not cleaned_text.strip():
+        warning = "Input text contains no recognizable words after preprocessing."
+
     result = {
         "text_preview": email_text[:200] + ("..." if len(email_text) > 200 else ""),
         "label": int(prediction),
@@ -88,6 +95,8 @@ def scan_email(model, email_text):
         "spam_probability": round(spam_prob, 2),
         "is_spam_or_phishing": prediction == 1,
     }
+    if warning:
+        result["warning"] = warning
     return result
 
 
@@ -123,6 +132,8 @@ def format_result(result):
     print(f"  Confidence: {result['confidence']}%")
     print(f"  Spam Prob:  {result['spam_probability']}%")
     print(f"  Threat:     {'YES - This email is SPAM/PHISHING!' if result['is_spam_or_phishing'] else 'NO - This email appears safe.'}")
+    if result.get("warning"):
+        print(f"\n  [TIP] {result['warning']}")
 
 
 def format_batch_results(results):

@@ -24,8 +24,17 @@ InboxSentinel/
 
 ## Quick Start
 ```bash
+# Install dependencies
 pip install -r requirements.txt
-python src/scan_email.py --email "your_email_text_here"
+
+# Scan a single email (pass the message body / subject text)
+python src/scan_email.py --email "Hi John, please find attached the Q3 financial report. Let me know if you have questions."
+
+# Scan a suspicious / phishing email
+python src/scan_email.py --email "URGENT: Your account has been suspended. Click here to verify your identity: http://fake-login-bank.com"
+
+# Batch scan a file of emails
+python src/scan_email.py --batch tests/test_emails.txt
 ```
 
 ## Phases
