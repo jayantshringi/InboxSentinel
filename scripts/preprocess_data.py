@@ -43,14 +43,17 @@ def clean_text(text):
 def infer_label_from_schema(df):
     """Try to find the label column in various possible names."""
     for col in df.columns:
-        if col.strip().lower() in ("label", "spam", "class", "target"):
+        if col.strip().lower() in ("label", "spam", "class", "target", "v1"):
             return col
     return None
 
 
 def load_and_normalize_csv(filepath, filename):
     """Load a CSV and normalize its columns to: text, label."""
-    df = pd.read_csv(filepath, low_memory=False)
+    try:
+        df = pd.read_csv(filepath, low_memory=False)
+    except UnicodeDecodeError:
+        df = pd.read_csv(filepath, low_memory=False, encoding="latin-1")
 
     # Find label column
     label_col = infer_label_from_schema(df)
@@ -59,28 +62,49 @@ def load_and_normalize_csv(filepath, filename):
         # If no label column, we can't train; skip
         return None, None
 
-    # The text might be in different columns depending on dataset
-    # We'll combine subject + body wherever possible
-    text_cols = [c for c in df.columns if c.strip().lower() in ("subject", "body", "text", "content")]
+    # Normalize text column based on dataset format
+    text_cols = [c for c in df.columns if c.strip().lower() in ("subject", "body", "text", "content", "v2")]
     if not text_cols:
         # Fallback: use first non-label column that looks like text
         text_cols = [c for c in df.columns if c.strip().lower() not in ("label",)]
 
     # Ensure label is numeric 0/1
     try:
-        df["label"] = pd.to_numeric(df[label_col], errors="coerce").fillna(0).astype(int)
+        # Handle SMS label formats
+        if label_col.strip().lower() == "v1" or label_col == "LABEL":
+            # Normalize SMS labels
+            def normalize_sms_label(label):
+                if pd.isna(label):
+                    return 0
+                label_str = str(label).strip().lower()
+                if label_str == "ham":
+                    return 0
+                elif label_str in ("spam", "smishing"):
+                    return 1
+                else:
+                    return 0  # default to safe for unknown values
+
+            df["label"] = df[label_col].apply(normalize_sms_label)
+        else:
+            df["label"] = pd.to_numeric(df[label_col], errors="coerce").fillna(0).astype(int)
     except Exception:
         df["label"] = 0
 
     # Build text column: combine subject and body if available
-    if "subject" in df.columns and "body" in df.columns:
-        df["text"] = df["subject"].fillna("") + " " + df["body"].fillna("")
+    subject_cols = [c for c in df.columns if c.strip().lower() == "subject"]
+    body_cols = [c for c in df.columns if c.strip().lower() == "body"]
+    if subject_cols and body_cols:
+        df["text"] = df[subject_cols[0]].fillna("") + " " + df[body_cols[0]].fillna("")
+    elif "v2" in df.columns:
+        df["text"] = df["v2"]
+    elif "TEXT" in df.columns:
+        df["text"] = df["TEXT"]
     elif "text_combined" in df.columns:
         df["text"] = df["text_combined"]
-    elif "body" in df.columns:
-        df["text"] = df["body"]
-    elif "subject" in df.columns:
-        df["text"] = df["subject"]
+    elif body_cols:
+        df["text"] = df[body_cols[0]]
+    elif subject_cols:
+        df["text"] = df[subject_cols[0]]
     else:
         df["text"] = ""
 
@@ -102,14 +126,17 @@ def main():
     all_dfs = []
     label_sources = []
 
-    csv_files = sorted(
-        f for f in os.listdir(DATASET_DIR) if f.endswith(".csv")
-    )
+    csv_files = []
+    for root, dirs, files in os.walk(DATASET_DIR):
+        for fname in files:
+            if fname.endswith(".csv"):
+                csv_files.append(os.path.join(root, fname))
+    csv_files = sorted(csv_files)
 
-    for fname in csv_files:
-        path = os.path.join(DATASET_DIR, fname)
+    for filepath in csv_files:
+        fname = os.path.basename(filepath)
         print(f"\nProcessing {fname}...")
-        df, label_src = load_and_normalize_csv(path, fname)
+        df, label_src = load_and_normalize_csv(filepath, fname)
         if df is not None:
             all_dfs.append(df)
             if label_src:
@@ -150,7 +177,7 @@ def main():
 
     # Save label mapping info
     label_counts = merged["label"].value_counts().to_dict()
-    mapping = {0: "safe/ham", 1: "spam/phishing"}
+    mapping = {0: "safe/ham", 1: "spam/phishing/smishing"}
     with open(os.path.join(os.path.dirname(__file__), "..", "data", "label_mapping.txt"), "w") as f:
         f.write("Label mapping:\n")
         f.write(f"  0 = {mapping[0]}\n")

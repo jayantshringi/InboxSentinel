@@ -1,15 +1,16 @@
 """
-Phase 4: Email Scanner CLI
+Phase 4: Email & SMS Scanner CLI
 
-Scan individual emails or batches of emails and classify them as:
+Scan individual emails or SMS messages and classify them as:
   - SAFE [HAM]
-  - SPAM / PHISHING [THREAT]
+  - SPAM / PHISHING / SMISHING [THREAT]
 
 Usage:
   python src/scan_email.py --text "Free money now!!!"
   python src/scan_email.py --email "Free money now!!!"
   python src/scan_email.py --file email.txt
   python src/scan_email.py --batch emails.txt
+  python src/scan_email.py --sms "Free prize! Click here now!"
 """
 import os
 import re
@@ -30,7 +31,7 @@ VECTORIZER_PATH = MODELS_DIR / "tfidf_vectorizer.pkl"
 # Label mapping
 LABELS = {
     0: "SAFE [HAM]",
-    1: "SPAM / PHISHING [THREAT]",
+    1: "SPAM / PHISHING / SMISHING [THREAT]",
 }
 
 
@@ -46,6 +47,24 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     # Remove punctuation
     text = text.translate(str.maketrans("", "", string.punctuation))
+    # Lowercase
+    text = text.lower()
+    return text
+
+
+def clean_sms_text(text):
+    """Clean SMS text to match training pipeline format.
+
+    SMS messages are shorter and rarely contain HTML, but may include
+    URLs, phone numbers, and special characters. We normalize whitespace
+    and lowercase but preserve URLs/phone numbers for context.
+    """
+    if not isinstance(text, str):
+        return ""
+    # Normalize whitespace/newlines
+    text = re.sub(r"\s+", " ", text).strip()
+    # Remove HTML tags (rare in SMS but possible)
+    text = re.sub(r"<.*?>", " ", text, flags=re.DOTALL)
     # Lowercase
     text = text.lower()
     return text
@@ -107,8 +126,8 @@ def scan_email_file(model, filepath):
     return scan_email(model, text)
 
 
-def scan_email_batch(model, filepath):
-    """Scan multiple emails from a text file (one per line)."""
+def scan_email_batch(model, filepath, source="email"):
+    """Scan multiple emails/SMS from a text file (one per line)."""
     results = []
     with open(filepath, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
@@ -116,22 +135,65 @@ def scan_email_batch(model, filepath):
     for i, line in enumerate(lines, 1):
         line = line.strip()
         if line:
-            result = scan_email(model, line)
+            if source == "sms":
+                result = scan_sms(model, line)
+            else:
+                result = scan_email(model, line)
             result["email_number"] = i
             results.append(result)
 
     return results
 
 
+def scan_sms(model, sms_text):
+    """
+    Scan a single SMS message and return classification result.
+
+    Returns:
+        dict with keys: text, label, label_name, confidence, is_spam
+    """
+    # Clean the SMS text
+    cleaned_text = clean_sms_text(sms_text)
+
+    # Predict
+    prediction = model.predict([cleaned_text])[0]
+    probabilities = model.predict_proba([cleaned_text])[0]
+    confidence = float(max(probabilities) * 100)
+
+    # Get probability of spam if relevant
+    spam_prob = float(probabilities[1]) * 100 if len(probabilities) > 1 else 0.0
+
+    # Check if input is only a phone number or lacks sufficient text
+    warning = None
+    if re.fullmatch(r"^[\d\s\-\+\(\)]{7,}$", sms_text.strip()):
+        warning = "You provided a phone number instead of the SMS message body. InboxSentinel is designed to scan SMS content/text."
+    elif not cleaned_text.strip():
+        warning = "Input text contains no recognizable words after preprocessing."
+
+    result = {
+        "text_preview": sms_text[:200] + ("..." if len(sms_text) > 200 else ""),
+        "label": int(prediction),
+        "label_name": LABELS.get(prediction, "UNKNOWN"),
+        "confidence": round(confidence, 2),
+        "spam_probability": round(spam_prob, 2),
+        "is_spam_or_phishing": prediction == 1,
+        "source": "sms",
+    }
+    if warning:
+        result["warning"] = warning
+    return result
+
+
 def format_result(result):
     """Format a result dict for pretty printing."""
-    print(f"\n--- Email Analysis Result ---")
+    source = result.get("source", "email").upper()
+    print(f"\n--- {source} Analysis Result ---")
     print(f"  Preview:    {result['text_preview']}")
     print(f"  Status:     {result['label_name']}")
-    print(f"  Label:      {result['label']} (0=safe, 1=spam/phishing)")
+    print(f"  Label:      {result['label']} (0=safe, 1=spam/phishing/smishing)")
     print(f"  Confidence: {result['confidence']}%")
     print(f"  Spam Prob:  {result['spam_probability']}%")
-    print(f"  Threat:     {'YES - This email is SPAM/PHISHING!' if result['is_spam_or_phishing'] else 'NO - This email appears safe.'}")
+    print(f"  Threat:     {'YES - This message is SPAM/PHISHING/SMISHING!' if result['is_spam_or_phishing'] else 'NO - This message appears safe.'}")
     if result.get("warning"):
         print(f"\n  [TIP] {result['warning']}")
 
@@ -141,8 +203,19 @@ def format_batch_results(results):
     safe_count = 0
     spam_count = 0
 
+    if not results:
+        source = "email"
+    else:
+        source = "email"
+        for r in results:
+            if r.get("source") in ["email", "sms"]:
+                source = r.get("source")
+                break
+
+    source_label = source.upper()
+
     print(f"\n{'='*70}")
-    print("BATCH SCAN SUMMARY")
+    print(f"{source_label.upper()} BATCH SCAN SUMMARY")
     print(f"{'='*70}")
 
     for r in results:
@@ -151,21 +224,26 @@ def format_batch_results(results):
             spam_count += 1
         else:
             safe_count += 1
-        print(f"\n  Email #{r.get('email_number', '?')}: [{status}] ({r['confidence']}% confidence)")
-        print(f"    Preview: {r['text_preview']}")
+        preview = r['text_preview']
+        # Truncate preview to show more context for SMS
+        if source == "sms" and len(preview) > 100:
+            preview = preview[:100] + "..."
+        print(f"\n  {source_label.upper()} #{r.get('email_number', '?')}: [{status}] ({r['confidence']}% confidence)")
+        print(f"    Preview: {preview}")
 
     print(f"\n{'='*70}")
-    print(f"Total emails scanned:  {len(results)}")
-    print(f"  Safe emails:    {safe_count}")
-    print(f"  Spam/Phishing:  {spam_count}")
+    total = len(results)
+    print(f"  Total {source_label} scanned:  {total}")
+    print(f"  Safe:    {safe_count}")
+    print(f"  Spam/Phishing/Smishing:  {spam_count}")
     print(f"{'='*70}")
 
-    return {"total": len(results), "safe": safe_count, "spam": spam_count}
+    return {"total": total, "safe": safe_count, "spam": spam_count}
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="InboxSentinel - AI-Powered Email Spam Detection"
+        description="InboxSentinel - AI-Powered Email & SMS Spam Detection"
     )
     parser.add_argument(
         "--text", "--email", type=str, default=None,
@@ -179,6 +257,14 @@ def main():
     parser.add_argument(
         "--batch", type=str, default=None,
         help="Path to a file with one email per line for batch scanning"
+    )
+    parser.add_argument(
+        "--sms-batch", type=str, default=None, dest="sms_batch",
+        help="Path to a file with one SMS message per line for batch SMS scanning"
+    )
+    parser.add_argument(
+        "--sms", type=str, default=None,
+        help="Scan an SMS message directly"
     )
     parser.add_argument(
         "--json", action="store_true",
@@ -214,7 +300,7 @@ def main():
         if not os.path.exists(args.batch):
             print(f"ERROR: File not found: {args.batch}")
             sys.exit(1)
-        results = scan_email_batch(model, args.batch)
+        results = scan_email_batch(model, args.batch, source="email")
         if args.json:
             print(json.dumps({
                 "summary": format_batch_results([]) if args.json else None,
@@ -222,6 +308,28 @@ def main():
             }, indent=2))
         else:
             format_batch_results(results)
+
+    # Batch SMS scanning
+    elif args.sms_batch:
+        if not os.path.exists(args.sms_batch):
+            print(f"ERROR: File not found: {args.sms_batch}")
+            sys.exit(1)
+        results = scan_email_batch(model, args.sms_batch, source="sms")
+        if args.json:
+            print(json.dumps({
+                "summary": format_batch_results([]) if args.json else None,
+                "results": results
+            }, indent=2))
+        else:
+            format_batch_results(results)
+
+    # Single SMS scan
+    elif args.sms:
+        result = scan_sms(model, args.sms)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            format_result(result)
 
     else:
         parser.print_help()

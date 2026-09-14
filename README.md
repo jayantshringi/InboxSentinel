@@ -35,6 +35,9 @@ python src/scan_email.py --email "URGENT: Your account has been suspended. Click
 
 # Batch scan a file of emails
 python src/scan_email.py --batch tests/test_emails.txt
+
+# Scan an SMS message
+python src/scan_email.py --sms "Free prize! Click here now!"
 ```
 
 ## Phases
@@ -46,3 +49,5 @@ python src/scan_email.py --batch tests/test_emails.txt
 
 ## Datasets Used
 - CEAS_08.csv, SpamAssasin.csv, Nigerian_Fraud.csv, phishing_email.csv, Ling.csv, Nazario.csv, Enron.csv
+- sms-dataset/spam-sms.csv (v1/v2 format, ~5.5K rows)
+- sms-dataset/spam-sms-2.csv (LABEL/TEXT format, ~10K rows, includes smishing)

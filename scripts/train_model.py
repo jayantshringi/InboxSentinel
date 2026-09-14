@@ -86,10 +86,11 @@ def train_model():
 
     # Also save class names for inference
     metadata = {
-        "classes": ["safe (label=0)", "spam/phishing (label=1)"],
+        "classes": ["safe/ham (label=0)", "spam/phishing/smishing (label=1)"],
         "accuracy": float(acc),
         "max_features": 5000,
         "ngram_range": [1, 2],
+        "supports_sms": True,
     }
     metadata_path = os.path.join(MODELS_DIR, "model_metadata.json")
     import json
@@ -102,12 +103,12 @@ def train_model():
 
 
 def predict_email(model, email_text):
-    """Predict whether a single email is safe or spam/phishing."""
+    """Predict whether a single email or SMS is safe or spam/phishing/smishing."""
     prediction = model.predict([email_text])[0]
     probability = model.predict_proba([email_text])[0]
     confidence = max(probability) * 100
 
-    label_map = {0: "SAFE [HAM]", 1: "SPAM/PHISHING [THREAT]"}
+    label_map = {0: "SAFE [HAM]", 1: "SPAM / PHISHING / SMISHING [THREAT]"}
     result = label_map.get(prediction, "UNKNOWN")
 
     return result, confidence
