@@ -30,7 +30,11 @@ InboxSentinel/
 # Install dependencies
 pip install -r requirements.txt
 
-# Scan a single email (pass the message body / subject text)
+# Launch the Cyber-Sentinel Web UI (Interactive Inspector & Batch Scanner)
+python src/web_server.py --port 8000
+# Then open http://127.0.0.1:8000 in your browser
+
+# Scan a single email (pass the message body / subject text via CLI)
 python src/scan_email.py --email "Hi John, please find attached the Q3 financial report. Let me know if you have questions."
 
 # Scan a suspicious / phishing email

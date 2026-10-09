@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InboxSentinel — Simple Email & SMS Safety Checker</title>
+  <meta name="description" content="A simple, intelligent tool to check if emails or SMS messages are safe, spam, or phishing.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Clean Minimalist Header -->
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" class="shield-icon" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4" stroke="currentColor"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">
+            <span>InboxSentinel</span>
+            <span class="brand-badge">98.3% accuracy</span>
+          </div>
+          <p class="brand-subtitle">Email & SMS scam checker</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs" role="tablist">
+        <button class="nav-tab active" id="tabBtnSingle" data-tab="single" role="tab" aria-selected="true">
+          <span>Check Message</span>
+        </button>
+        <button class="nav-tab" id="tabBtnBatch" data-tab="batch" role="tab" aria-selected="false">
+          <span>Batch Check</span>
+        </button>
+        <button class="nav-tab" id="tabBtnIntel" data-tab="intel" role="tab" aria-selected="false">
+          <span>How It Works</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main">
+      <!-- ============================================== -->
+      <!-- TAB 1: SINGLE MESSAGE CHECKER                  -->
+      <!-- ============================================== -->
+      <section id="panelSingle" class="tab-panel active" role="tabpanel">
+        <!-- Controls: Type Switcher & Sample Examples -->
+        <div class="sub-header-bar">
+          <div class="type-selector" role="radiogroup" aria-label="Message Type">
+            <button class="type-pill active" id="modeBtnEmail" data-mode="email" role="radio" aria-checked="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="pill-icon"><path stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+              <span>Email</span>
+            </button>
+            <button class="type-pill" id="modeBtnSms" data-mode="sms" role="radio" aria-checked="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="pill-icon"><path stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+              <span>SMS / Text</span>
+            </button>
+          </div>
+
+          <div class="sample-examples">
+            <span class="sample-label">Try an example:</span>
+            <div class="sample-chips" id="presetChipsContainer">
+              <!-- Dynamically populated -->
+              <button class="sample-chip" data-preset="bank_phishing">Fake Bank Alert</button>
+              <button class="sample-chip" data-preset="crypto_scam">Crypto Giveaway</button>
+              <button class="sample-chip" data-preset="safe_work">Work Meeting</button>
+              <button class="sample-chip" data-preset="sms_parcel">USPS Package Text</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Two Column Main Layout -->
+        <div class="content-grid">
+          <!-- Input Card -->
+          <div class="card input-card">
+            <div class="card-top">
+              <div>
+                <h2 class="card-heading" id="inputCardTitle">Message content</h2>
+                <p class="card-subheading" id="inputCardDesc">Paste the text of the message you want to verify.</p>
+              </div>
+              <div class="quick-actions">
+                <button class="text-btn" id="btnPaste">Paste</button>
+                <button class="text-btn" id="btnClear">Clear</button>
+              </div>
+            </div>
+
+            <div class="textarea-container">
+              <textarea 
+                id="messageInput" 
+                class="message-box" 
+                placeholder="Paste the email subject and body, or an SMS message here..."
+                spellcheck="false"
+              ></textarea>
+              <div class="textarea-meta">
+                <span class="char-count" id="charCount">0 characters</span>
+                <span class="keyboard-hint">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to check</span>
+              </div>
+            </div>
+
+            <div class="card-action">
+              <button class="primary-btn" id="btnScan">
+                <span id="btnScanText">Check Message</span>
+                <div class="spinner hidden" id="scanSpinner"></div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Result Card -->
+          <div class="card result-card" id="resultsCard">
+            <!-- Empty state when no scan has run -->
+            <div class="empty-state" id="emptyState">
+              <div class="empty-illustration">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+              </div>
+              <h3 class="empty-heading">Nothing checked yet</h3>
+              <p class="empty-text">Enter message content on the left or click an example above to see the safety verdict and key signals.</p>
+            </div>
+
+            <!-- Verdict display -->
+            <div class="verdict-content hidden" id="verdictContent">
+              <!-- Friendly Verdict Callout -->
+              <div class="verdict-callout" id="verdictBanner">
+                <div class="callout-icon" id="badgeIcon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" id="verdictIconSvg"><path stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <div class="callout-body">
+                  <div class="callout-title" id="verdictTitle">Looks safe</div>
+                  <p class="callout-desc" id="verdictClassification">This message does not show obvious spam or phishing indicators.</p>
+                </div>
+                <div class="confidence-chip" id="gaugePercent">98%</div>
+              </div>
+
+              <!-- Probability Bar -->
+              <div class="score-card">
+                <div class="score-row">
+                  <span class="score-label">Spam probability</span>
+                  <span class="score-number" id="spamProbVal">1%</span>
+                </div>
+                <div class="score-track">
+                  <div class="score-fill" id="spamProbFill" style="width: 1%"></div>
+                </div>
+                <div class="score-footer">
+                  <span class="score-sub">Calculated by AI classification model</span>
+                  <span class="risk-badge" id="heuristicRiskPill">Low Risk</span>
+                </div>
+              </div>
+
+              <!-- Warning Box if text is only email address/phone -->
+              <div class="user-warning hidden" id="warningBox">
+                <span class="warning-icon">ℹ️</span>
+                <span id="warningText"></span>
+              </div>
+
+              <!-- Humanized Breakdown Section -->
+              <div class="analysis-section">
+                <h4 class="section-title">What we noticed</h4>
+
+                <div class="findings-list">
+                  <!-- Urgency -->
+                  <div class="finding-item" id="groupUrgency">
+                    <div class="finding-header">
+                      <span class="finding-name">Urgency or pressure phrases</span>
+                      <span class="finding-badge" id="urgencyCount">0</span>
+                    </div>
+                    <div class="tags-row" id="urgencyTags">
+                      <span class="no-signals">None found</span>
+                    </div>
+                  </div>
+
+                  <!-- Credential -->
+                  <div class="finding-item" id="groupCredential">
+                    <div class="finding-header">
+                      <span class="finding-name">Requests for passwords or verification</span>
+                      <span class="finding-badge" id="credentialCount">0</span>
+                    </div>
+                    <div class="tags-row" id="credentialTags">
+                      <span class="no-signals">None found</span>
+                    </div>
+                  </div>
+
+                  <!-- Financial -->
+                  <div class="finding-item" id="groupFinancial">
+                    <div class="finding-header">
+                      <span class="finding-name">Financial or prize claims</span>
+                      <span class="finding-badge" id="financialCount">0</span>
+                    </div>
+                    <div class="tags-row" id="financialTags">
+                      <span class="no-signals">None found</span>
+                    </div>
+                  </div>
+
+                  <!-- Links -->
+                  <div class="finding-item" id="groupUrls">
+                    <div class="finding-header">
+                      <span class="finding-name">Links and website destinations</span>
+                      <span class="finding-badge" id="urlsCount">0</span>
+                    </div>
+                    <div class="tags-row" id="urlsList">
+                      <span class="no-signals">No links found</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Explanation summary -->
+                <div class="summary-note">
+                  <strong class="note-label">Summary:</strong>
+                  <span id="forensicSummaryText">Clean message. No threat indicators triggered.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 2: BATCH CHECKER                           -->
+      <!-- ============================================== -->
+      <section id="panelBatch" class="tab-panel" role="tabpanel">
+        <div class="batch-container">
+          <div class="card batch-input-box">
+            <div class="card-top">
+              <div>
+                <h2 class="card-heading">Check multiple messages</h2>
+                <p class="card-subheading">Upload a text file with one message per line, or paste them directly below.</p>
+              </div>
+
+              <div class="type-selector">
+                <button class="type-pill active" id="batchModeEmail" data-mode="email">Emails</button>
+                <button class="type-pill" id="batchModeSms" data-mode="sms">SMS</button>
+              </div>
+            </div>
+
+            <!-- Upload Area -->
+            <div class="upload-area" id="fileDropzone">
+              <input type="file" id="batchFileInput" accept=".txt,.csv" class="hidden-file-input">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="upload-icon">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+              <div class="upload-text"><strong>Choose a file</strong> or drag and drop a <code>.txt</code> file here</div>
+              <div class="upload-sub">One message per line</div>
+            </div>
+
+            <!-- Paste Input -->
+            <div class="batch-paste-group">
+              <div class="batch-paste-header">
+                <span class="label-text">Or paste messages below (one per line):</span>
+                <button class="text-btn" id="btnLoadTestBatch">Load 10 test messages</button>
+              </div>
+              <textarea 
+                id="batchTextInput" 
+                class="batch-box" 
+                rows="6" 
+                placeholder="Line 1: Meeting has been moved to 3pm today...&#10;Line 2: URGENT: Your account has been suspended, click here...&#10;Line 3: Thanks for the update yesterday..."
+              ></textarea>
+            </div>
+
+            <div class="card-action">
+              <button class="primary-btn" id="btnBatchScan">
+                <span id="btnBatchScanText">Check All Messages</span>
+                <div class="spinner hidden" id="batchSpinner"></div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Batch Results Card -->
+          <div class="card batch-results-box" id="batchResultsCard">
+            <!-- Summary Numbers -->
+            <div class="summary-stats">
+              <div class="stat-cell">
+                <span class="stat-count" id="batchTotalCount">0</span>
+                <span class="stat-desc">Total checked</span>
+              </div>
+              <div class="stat-cell stat-safe">
+                <span class="stat-count" id="batchSafeCount">0</span>
+                <span class="stat-desc">Safe messages</span>
+              </div>
+              <div class="stat-cell stat-threat">
+                <span class="stat-count" id="batchThreatCount">0</span>
+                <span class="stat-desc">Suspicious / Spam</span>
+              </div>
+              <div class="stat-cell">
+                <span class="stat-count" id="batchThreatRate">0%</span>
+                <span class="stat-desc">Spam rate</span>
+              </div>
+            </div>
+
+            <!-- Filter Pills & Export -->
+            <div class="table-bar">
+              <div class="filter-group">
+                <button class="filter-pill active" data-filter="all" id="filterAll">All (<span id="countFilterAll">0</span>)</button>
+                <button class="filter-pill" data-filter="threat" id="filterThreat">Suspicious (<span id="countFilterThreat">0</span>)</button>
+                <button class="filter-pill" data-filter="safe" id="filterSafe">Safe (<span id="countFilterSafe">0</span>)</button>
+              </div>
+
+              <div class="export-group">
+                <button class="secondary-btn" id="btnExportCsv">Export CSV</button>
+                <button class="secondary-btn" id="btnExportJson">Export JSON</button>
+              </div>
+            </div>
+
+            <!-- Table -->
+            <div class="table-wrap">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th style="width: 50px;">#</th>
+                    <th style="width: 130px;">Verdict</th>
+                    <th>Message</th>
+                    <th style="width: 110px;">Confidence</th>
+                    <th style="width: 100px;">Signals</th>
+                    <th style="width: 80px;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="batchTableBody">
+                  <tr>
+                    <td colspan="6" class="table-empty-row">No messages checked yet. Add some above and click Check All.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 3: HOW IT WORKS                           -->
+      <!-- ============================================== -->
+      <section id="panelIntel" class="tab-panel" role="tabpanel">
+        <div class="intel-cards">
+          <div class="card info-card">
+            <h3 class="info-heading">How InboxSentinel analyzes messages</h3>
+            <p class="info-p">InboxSentinel combines machine learning with natural language heuristic inspection to recognize dangerous patterns commonly used by attackers.</p>
+
+            <div class="feature-rows">
+              <div class="feature-item">
+                <div class="feature-icon">📊</div>
+                <div>
+                  <strong>Trained on 164,970 real-world examples</strong>
+                  <p>Includes public security datasets (Enron, SpamAssassin, CEAS, Nigerian Fraud, SMS Spam) achieving 98.30% test accuracy.</p>
+                </div>
+              </div>
+
+              <div class="feature-item">
+                <div class="feature-icon">⚡</div>
+                <div>
+                  <strong>Lightweight and private</strong>
+                  <p>Runs completely locally on your computer with zero external cloud calls. No message data ever leaves your device.</p>
+                </div>
+              </div>
+
+              <div class="feature-item">
+                <div class="feature-icon">🔍</div>
+                <div>
+                  <strong>Heuristic indicator extraction</strong>
+                  <p>In addition to raw probability scores, the scanner highlights manipulative phrasing such as artificial deadlines, spoofed verification forms, and suspicious link destinations.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card info-card">
+            <h3 class="info-heading">Key signals we look for</h3>
+            <div class="signals-list">
+              <div class="signal-card">
+                <strong>Artificial Urgency</strong>
+                <p>Phrases like "Account suspended", "Action required within 24 hours", or "Final warning" designed to induce panic.</p>
+              </div>
+              <div class="signal-card">
+                <strong>Credential Traps</strong>
+                <p>Links asking you to "Verify your identity", "Reset password", or "Confirm billing information".</p>
+              </div>
+              <div class="signal-card">
+                <strong>Too Good to Be True</strong>
+                <p>Unsolicited lottery winnings, 1000% crypto returns, or inheritance claims.</p>
+              </div>
+              <div class="signal-card">
+                <strong>Deceptive Links</strong>
+                <p>Direct numeric IP addresses, uncommon web extensions (.xyz, .top), or URLs mimicking reputable brands.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Simple, Clean Footer -->
+    <footer class="app-footer">
+      <div>InboxSentinel • Fast, local email & SMS safety inspection</div>
+      <div class="footer-meta">Model accuracy: 98.30% • Local inference</div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
