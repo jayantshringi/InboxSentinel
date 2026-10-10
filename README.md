@@ -20,8 +20,8 @@ InboxSentinel/
 ├── tests/         # Test files
 ├── datasets/      # Raw datasets (CSV files)
 ├── requirements.txt
-├── README.md
-└── memory.md      # Project task tracking
+└── README.md
+ 
 ```
 
 ## Quick Start
