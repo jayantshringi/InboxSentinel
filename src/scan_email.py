@@ -1,7 +1,7 @@
 """
-Phase 4: Email & SMS Scanner CLI
+Phase 4: Email & SMS Scanner CLI (Enhanced with Forensics & EML Support)
 
-Scan individual emails or SMS messages and classify them as:
+Scan individual emails, SMS messages, or .EML files and classify them as:
   - SAFE [HAM]
   - SPAM / PHISHING / SMISHING [THREAT]
 
@@ -9,6 +9,7 @@ Usage:
   python src/scan_email.py --text "Free money now!!!"
   python src/scan_email.py --email "Free money now!!!"
   python src/scan_email.py --file email.txt
+  python src/scan_email.py --eml message.eml
   python src/scan_email.py --batch emails.txt
   python src/scan_email.py --sms "Free prize! Click here now!"
 """
@@ -27,6 +28,16 @@ MODELS_DIR = BASE_DIR / "models"
 
 SPAM_MODEL_PATH = MODELS_DIR / "spam_detector.pkl"
 VECTORIZER_PATH = MODELS_DIR / "tfidf_vectorizer.pkl"
+
+# Import threat analyzer forensics if available
+try:
+    from src.threat_analyzer import parse_eml_content, analyze_threat_indicators
+except ImportError:
+    try:
+        from threat_analyzer import parse_eml_content, analyze_threat_indicators
+    except ImportError:
+        parse_eml_content = None
+        analyze_threat_indicators = None
 
 # Label mapping
 LABELS = {
@@ -53,21 +64,9 @@ def clean_text(text):
 
 
 def clean_sms_text(text):
-    """Clean SMS text to match training pipeline format.
-
-    SMS messages are shorter and rarely contain HTML, but may include
-    URLs, phone numbers, and special characters. We normalize whitespace
-    and lowercase but preserve URLs/phone numbers for context.
-    """
-    if not isinstance(text, str):
-        return ""
-    # Normalize whitespace/newlines
-    text = re.sub(r"\s+", " ", text).strip()
-    # Remove HTML tags (rare in SMS but possible)
-    text = re.sub(r"<.*?>", " ", text, flags=re.DOTALL)
-    # Lowercase
-    text = text.lower()
-    return text
+    """Clean SMS text to match training pipeline format."""
+    # Preprocessing pipeline in scripts/preprocess_data.py normalized all texts using clean_text
+    return clean_text(text)
 
 
 def load_model():
@@ -112,7 +111,7 @@ def scan_email(model, email_text):
         "label_name": LABELS.get(prediction, "UNKNOWN"),
         "confidence": round(confidence, 2),
         "spam_probability": round(spam_prob, 2),
-        "is_spam_or_phishing": prediction == 1,
+        "is_spam_or_phishing": bool(prediction == 1),
     }
     if warning:
         result["warning"] = warning
@@ -124,6 +123,33 @@ def scan_email_file(model, filepath):
     with open(filepath, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
     return scan_email(model, text)
+
+
+def scan_eml_file(model, filepath):
+    """Scan an RFC 822 .eml file, extracting headers and body forensics."""
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        eml_text = f.read()
+
+    if parse_eml_content is None or analyze_threat_indicators is None:
+        return scan_email(model, eml_text)
+
+    header_info = parse_eml_content(eml_text)
+    text_to_scan = header_info["full_text"] or header_info["extracted_body"]
+    result = scan_email(model, text_to_scan)
+    indicators = analyze_threat_indicators(text_to_scan, is_sms=False, header_info=header_info)
+
+    result["header_info"] = header_info
+    result["indicators"] = indicators
+    result["header_alerts"] = indicators.get("header_alerts", [])
+
+    # If severe header alerts exist, elevate threat verdict
+    if result["header_alerts"]:
+        if any(a.get("severity") == "CRITICAL" for a in result["header_alerts"]):
+            result["is_spam_or_phishing"] = True
+            result["label"] = 1
+            result["label_name"] = LABELS[1]
+
+    return result
 
 
 def scan_email_batch(model, filepath, source="email"):
@@ -176,7 +202,7 @@ def scan_sms(model, sms_text):
         "label_name": LABELS.get(prediction, "UNKNOWN"),
         "confidence": round(confidence, 2),
         "spam_probability": round(spam_prob, 2),
-        "is_spam_or_phishing": prediction == 1,
+        "is_spam_or_phishing": bool(prediction == 1),
         "source": "sms",
     }
     if warning:
@@ -194,6 +220,22 @@ def format_result(result):
     print(f"  Confidence: {result['confidence']}%")
     print(f"  Spam Prob:  {result['spam_probability']}%")
     print(f"  Threat:     {'YES - This message is SPAM/PHISHING/SMISHING!' if result['is_spam_or_phishing'] else 'NO - This message appears safe.'}")
+
+    if result.get("header_info"):
+        hi = result["header_info"]
+        print(f"\n  [EMAIL HEADERS]")
+        if hi.get("subject"):
+            print(f"    Subject:  {hi['subject']}")
+        if hi.get("from_raw"):
+            print(f"    From:     {hi['from_raw']}")
+        if hi.get("reply_to"):
+            print(f"    Reply-To: {hi['reply_to']}")
+
+    if result.get("header_alerts"):
+        print(f"\n  [HEADER SPOOFING ALERTS]")
+        for alert in result["header_alerts"]:
+            print(f"    [{alert['severity']}] {alert['message']}")
+
     if result.get("warning"):
         print(f"\n  [TIP] {result['warning']}")
 
@@ -255,6 +297,10 @@ def main():
         help="Path to a file containing a single email"
     )
     parser.add_argument(
+        "--eml", type=str, default=None,
+        help="Path to an RFC 822 .eml email file for header & body forensics"
+    )
+    parser.add_argument(
         "--batch", type=str, default=None,
         help="Path to a file with one email per line for batch scanning"
     )
@@ -290,6 +336,17 @@ def main():
             print(f"ERROR: File not found: {args.file}")
             sys.exit(1)
         result = scan_email_file(model, args.file)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            format_result(result)
+
+    # Single email from .eml file
+    elif args.eml:
+        if not os.path.exists(args.eml):
+            print(f"ERROR: File not found: {args.eml}")
+            sys.exit(1)
+        result = scan_eml_file(model, args.eml)
         if args.json:
             print(json.dumps(result, indent=2))
         else:

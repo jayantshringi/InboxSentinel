@@ -2,7 +2,7 @@
 InboxSentinel Web Application Server
 
 Lightweight, high-performance HTTP server providing a REST API and serving the
-Cyber-Sentinel Web Interface for real-time email and SMS threat analysis.
+Cyber-Sentinel Web Interface for real-time email, SMS, and EML threat analysis.
 Zero external framework dependencies (uses Python standard library ThreadingHTTPServer).
 """
 import os
@@ -18,9 +18,10 @@ BASE_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from src.scan_email import load_model, scan_email, scan_sms
-from src.threat_analyzer import analyze_threat_indicators
+from src.threat_analyzer import analyze_threat_indicators, parse_eml_content
 
 UI_DIR = Path(__file__).parent / "ui"
+MAX_PAYLOAD_SIZE = 5 * 1024 * 1024  # 5 MB max payload guard
 
 # Curated presets for instant testing
 SAMPLE_PRESETS = [
@@ -31,6 +32,14 @@ SAMPLE_PRESETS = [
         "type": "email",
         "description": "Urgent security alert demanding immediate credentials verification.",
         "text": "URGENT: Your Wells Fargo bank account has been suspended due to unauthorized access attempts. Click here to verify your identity within 24 hours to prevent permanent deactivation: http://fake-login-bank.com/auth"
+    },
+    {
+        "id": "eml_spoof",
+        "title": "EML: Brand Header Spoofing",
+        "category": "Email Forensics (.EML)",
+        "type": "eml",
+        "description": "RFC 822 email headers spoofing PayPal with an unauthorized external domain and failed SPF.",
+        "text": "From: \"PayPal Billing Dept\" <billing-notice@mail-account-update19.xyz>\nReply-To: security-drop@hacker-collector.top\nTo: customer@example.com\nSubject: Critical Security Notice: Unauthorized Transaction\nDate: Sat, 10 Oct 2026 09:12:00 +0000\nAuthentication-Results: mx.example.com; spf=fail smtp.mailfrom=mail-account-update19.xyz; dkim=fail\n\nDear Valued Customer,\n\nWe detected unauthorized login attempts from a new location. Your account has been temporarily restricted.\n\nClick here to verify your identity within 24 hours: http://paypa1-security.xyz/auth\n\nThank you,\nPayPal Support Team"
     },
     {
         "id": "crypto_scam",
@@ -106,10 +115,11 @@ class InboxSentinelHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/health":
             self.send_json_response({
                 "status": "healthy",
-                "version": "1.0.0",
-                "model_name": "TF-IDF + Logistic Regression",
+                "version": "1.1.0",
+                "model_name": "TF-IDF + Logistic Regression (Enhanced Forensics)",
                 "accuracy": 98.3,
-                "classes": ["Safe (0)", "Threat (1)"]
+                "classes": ["Safe (0)", "Threat (1)"],
+                "features": ["email", "sms", "eml_forensics", "homoglyphs", "typosquatting", "token_highlighting"]
             })
             return
 
@@ -138,16 +148,31 @@ class InboxSentinelHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        # Parse content length and read body
+        # Enforce payload size limit
         try:
             content_length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self.send_error_response("Invalid Content-Length header", HTTPStatus.BAD_REQUEST)
+            return
+
+        if content_length > MAX_PAYLOAD_SIZE:
+            self.send_error_response(
+                f"Payload too large. Maximum supported size is {MAX_PAYLOAD_SIZE // (1024 * 1024)}MB.",
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+            )
+            return
+
+        # Parse body JSON
+        try:
             post_body = self.rfile.read(content_length)
             data = json.loads(post_body.decode("utf-8")) if post_body else {}
         except Exception as e:
             self.send_error_response(f"Invalid JSON body: {str(e)}", HTTPStatus.BAD_REQUEST)
             return
 
-        if self.path == "/api/scan":
+        if self.path in ["/api/scan", "/api/scan-eml"]:
+            if self.path == "/api/scan-eml":
+                data["mode"] = "eml"
             self.handle_single_scan(data)
         elif self.path == "/api/batch":
             self.handle_batch_scan(data)
@@ -157,34 +182,58 @@ class InboxSentinelHandler(SimpleHTTPRequestHandler):
     def handle_single_scan(self, data):
         text = data.get("text", "")
         mode = data.get("mode", "email").lower()
+        is_eml = mode == "eml" or data.get("is_eml", False)
 
         if not text or not str(text).strip():
             self.send_error_response("Input text cannot be empty", HTTPStatus.BAD_REQUEST)
             return
+
+        header_info = None
+        text_to_scan = text
+
+        # Automatic EML detection: mode == 'eml' or starting with standard RFC 822 headers
+        if is_eml or (isinstance(text, str) and ("\nFrom: " in "\n" + text[:400] and ("\nSubject: " in "\n" + text[:400] or "\nTo: " in "\n" + text[:400]))):
+            try:
+                header_info = parse_eml_content(text)
+                if header_info.get("extracted_body") or header_info.get("subject"):
+                    text_to_scan = header_info.get("full_text") or header_info.get("extracted_body")
+                    is_eml = True
+            except Exception:
+                header_info = None
 
         is_sms = mode == "sms"
         model = self.server.model
 
         # Perform ML scan
         if is_sms:
-            ml_result = scan_sms(model, text)
+            ml_result = scan_sms(model, text_to_scan)
         else:
-            ml_result = scan_email(model, text)
+            ml_result = scan_email(model, text_to_scan)
 
-        # Perform Heuristic Threat Analysis
-        indicators = analyze_threat_indicators(text, is_sms=is_sms)
+        # Perform Heuristic & Forensic Threat Analysis
+        indicators = analyze_threat_indicators(text_to_scan, is_sms=is_sms, header_info=header_info)
 
         # Calculate safe probability
         spam_prob = float(ml_result.get("spam_probability", 0.0))
         safe_prob = round(100.0 - spam_prob, 2)
         is_threat = bool(ml_result.get("is_spam_or_phishing", False))
-        label_val = int(ml_result.get("label", 0))
+
+        # Header alerts can escalate to threat
+        header_alerts = indicators.get("header_alerts", [])
+        if header_alerts and any(a.get("severity") == "CRITICAL" for a in header_alerts):
+            is_threat = True
+            if spam_prob < 50.0:
+                spam_prob = 85.0
+                safe_prob = 15.0
+
+        label_val = 1 if is_threat else int(ml_result.get("label", 0))
         confidence_val = float(ml_result.get("confidence", 0.0))
 
         response_payload = {
-            "mode": mode,
+            "mode": "eml" if is_eml else mode,
+            "is_eml": is_eml,
             "label": label_val,
-            "label_name": str(ml_result.get("label_name", "UNKNOWN")),
+            "label_name": "SPAM / PHISHING / SMISHING [THREAT]" if is_threat else str(ml_result.get("label_name", "SAFE [HAM]")),
             "is_threat": is_threat,
             "confidence": confidence_val,
             "spam_probability": spam_prob,
@@ -192,6 +241,9 @@ class InboxSentinelHandler(SimpleHTTPRequestHandler):
             "warning": ml_result.get("warning"),
             "text_preview": str(ml_result.get("text_preview", "")),
             "indicators": indicators,
+            "header_info": header_info,
+            "header_alerts": header_alerts,
+            "highlight_spans": indicators.get("highlight_spans", []),
         }
 
         self.send_json_response(response_payload)

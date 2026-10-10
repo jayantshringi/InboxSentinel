@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>InboxSentinel — Simple Email & SMS Safety Checker</title>
-  <meta name="description" content="A simple, intelligent tool to check if emails or SMS messages are safe, spam, or phishing.">
+  <meta name="description" content="A simple, intelligent tool to check if emails, SMS, or .eml files are safe, spam, or phishing.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -27,22 +27,32 @@
             <span>InboxSentinel</span>
             <span class="brand-badge">98.3% accuracy</span>
           </div>
-          <p class="brand-subtitle">Email & SMS scam checker</p>
+          <p class="brand-subtitle">Email, SMS & EML scam detector</p>
         </div>
       </div>
 
-      <!-- Navigation Tabs -->
-      <nav class="nav-tabs" role="tablist">
-        <button class="nav-tab active" id="tabBtnSingle" data-tab="single" role="tab" aria-selected="true">
-          <span>Check Message</span>
+      <!-- Navigation & History -->
+      <div class="header-right-group">
+        <nav class="nav-tabs" role="tablist">
+          <button class="nav-tab active" id="tabBtnSingle" data-tab="single" role="tab" aria-selected="true">
+            <span>Check Message</span>
+          </button>
+          <button class="nav-tab" id="tabBtnBatch" data-tab="batch" role="tab" aria-selected="false">
+            <span>Batch Check</span>
+          </button>
+          <button class="nav-tab" id="tabBtnIntel" data-tab="intel" role="tab" aria-selected="false">
+            <span>How It Works</span>
+          </button>
+        </nav>
+
+        <button class="history-toggle-btn" id="btnToggleHistory" title="View Recent Scan History">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="history-icon">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span>History</span>
+          <span class="history-badge" id="historyCountBadge">0</span>
         </button>
-        <button class="nav-tab" id="tabBtnBatch" data-tab="batch" role="tab" aria-selected="false">
-          <span>Batch Check</span>
-        </button>
-        <button class="nav-tab" id="tabBtnIntel" data-tab="intel" role="tab" aria-selected="false">
-          <span>How It Works</span>
-        </button>
-      </nav>
+      </div>
     </header>
 
     <!-- Main Content -->
@@ -62,13 +72,18 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="pill-icon"><path stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
               <span>SMS / Text</span>
             </button>
+            <button class="type-pill" id="modeBtnEml" data-mode="eml" role="radio" aria-checked="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="pill-icon"><path stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              <span>.EML / Headers</span>
+            </button>
           </div>
 
           <div class="sample-examples">
             <span class="sample-label">Try an example:</span>
             <div class="sample-chips" id="presetChipsContainer">
-              <!-- Dynamically populated -->
+              <!-- Dynamically populated from /api/presets -->
               <button class="sample-chip" data-preset="bank_phishing">Fake Bank Alert</button>
+              <button class="sample-chip" data-preset="eml_spoof">PayPal EML Spoof</button>
               <button class="sample-chip" data-preset="crypto_scam">Crypto Giveaway</button>
               <button class="sample-chip" data-preset="safe_work">Work Meeting</button>
               <button class="sample-chip" data-preset="sms_parcel">USPS Package Text</button>
@@ -83,24 +98,53 @@
             <div class="card-top">
               <div>
                 <h2 class="card-heading" id="inputCardTitle">Message content</h2>
-                <p class="card-subheading" id="inputCardDesc">Paste the text of the message you want to verify.</p>
+                <p class="card-subheading" id="inputCardDesc">Paste email text, SMS, or drag & drop a .eml file.</p>
               </div>
               <div class="quick-actions">
+                <input type="file" id="singleFileInput" accept=".eml,.txt,.msg" class="hidden-file-input">
+                <button class="text-btn" id="btnUploadSingle" title="Upload a .eml or .txt message">Upload File</button>
                 <button class="text-btn" id="btnPaste">Paste</button>
                 <button class="text-btn" id="btnClear">Clear</button>
               </div>
             </div>
 
-            <div class="textarea-container">
+            <!-- View Mode Switcher (Editor vs Heatmap) -->
+            <div class="view-mode-bar">
+              <div class="view-mode-pills">
+                <button class="view-pill active" id="btnViewEditor">Editor</button>
+                <button class="view-pill" id="btnViewHeatmap" disabled title="Check a message first to view threat highlights">
+                  <span>Threat Heatmap</span>
+                  <span class="heatmap-badge hidden" id="heatmapBadge">0</span>
+                </button>
+              </div>
+              <span class="view-hint" id="viewHint">Live text input</span>
+            </div>
+
+            <!-- Editor View -->
+            <div class="textarea-container" id="editorContainer">
               <textarea 
                 id="messageInput" 
                 class="message-box" 
-                placeholder="Paste the email subject and body, or an SMS message here..."
+                placeholder="Paste the email subject and body, an SMS message, or drag & drop a .eml file here..."
                 spellcheck="false"
               ></textarea>
               <div class="textarea-meta">
                 <span class="char-count" id="charCount">0 characters</span>
                 <span class="keyboard-hint">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to check</span>
+              </div>
+            </div>
+
+            <!-- Interactive Threat Heatmap View -->
+            <div class="heatmap-container hidden" id="heatmapContainer">
+              <div class="heatmap-scroll-area">
+                <div class="heatmap-body" id="heatmapBody"></div>
+              </div>
+              <div class="heatmap-legend">
+                <span class="legend-item"><span class="legend-dot dot-urgency"></span> Urgency Cues</span>
+                <span class="legend-item"><span class="legend-dot dot-credential"></span> Credential Traps</span>
+                <span class="legend-item"><span class="legend-dot dot-financial"></span> Financial Lures</span>
+                <span class="legend-item"><span class="legend-dot dot-url"></span> High-Risk Links</span>
+                <span class="legend-item"><span class="legend-dot dot-smishing"></span> Smishing Markers</span>
               </div>
             </div>
 
@@ -122,7 +166,7 @@
                 </svg>
               </div>
               <h3 class="empty-heading">Nothing checked yet</h3>
-              <p class="empty-text">Enter message content on the left or click an example above to see the safety verdict and key signals.</p>
+              <p class="empty-text">Enter message content on the left, upload a file, or click an example above to see the safety verdict, key signals, and threat heatmap.</p>
             </div>
 
             <!-- Verdict display -->
@@ -137,6 +181,40 @@
                   <p class="callout-desc" id="verdictClassification">This message does not show obvious spam or phishing indicators.</p>
                 </div>
                 <div class="confidence-chip" id="gaugePercent">98%</div>
+              </div>
+
+              <!-- Email Header Forensics Card (Active if EML / Headers detected) -->
+              <div class="header-forensics-card hidden" id="headerForensicsCard">
+                <div class="forensics-head">
+                  <div class="forensics-title-wrap">
+                    <span class="forensics-icon">🛡️</span>
+                    <div>
+                      <h4 class="forensics-title">Email Header Forensics</h4>
+                      <p class="forensics-sub">RFC 822 sender & authentication verification</p>
+                    </div>
+                  </div>
+                  <span class="auth-pill" id="headerAuthPill">Header Check</span>
+                </div>
+
+                <div class="forensics-meta-table">
+                  <div class="meta-row">
+                    <span class="meta-key">From:</span>
+                    <span class="meta-val" id="metaFrom">—</span>
+                  </div>
+                  <div class="meta-row" id="rowReplyTo">
+                    <span class="meta-key">Reply-To:</span>
+                    <span class="meta-val" id="metaReplyTo">—</span>
+                  </div>
+                  <div class="meta-row">
+                    <span class="meta-key">Subject:</span>
+                    <span class="meta-val" id="metaSubject">—</span>
+                  </div>
+                </div>
+
+                <div class="header-alerts-container hidden" id="headerAlertsContainer">
+                  <h5 class="alerts-heading">Security Warnings</h5>
+                  <div class="alerts-list" id="headerAlertsList"></div>
+                </div>
               </div>
 
               <!-- Probability Bar -->
@@ -198,10 +276,10 @@
                     </div>
                   </div>
 
-                  <!-- Links -->
+                  <!-- Links & Domains -->
                   <div class="finding-item" id="groupUrls">
                     <div class="finding-header">
-                      <span class="finding-name">Links and website destinations</span>
+                      <span class="finding-name">Links, domains and homoglyphs</span>
                       <span class="finding-badge" id="urlsCount">0</span>
                     </div>
                     <div class="tags-row" id="urlsList">
@@ -338,7 +416,7 @@
         <div class="intel-cards">
           <div class="card info-card">
             <h3 class="info-heading">How InboxSentinel analyzes messages</h3>
-            <p class="info-p">InboxSentinel combines machine learning with natural language heuristic inspection to recognize dangerous patterns commonly used by attackers.</p>
+            <p class="info-p">InboxSentinel combines machine learning with natural language heuristic inspection and RFC 822 email forensics to recognize dangerous patterns commonly used by attackers.</p>
 
             <div class="feature-rows">
               <div class="feature-item">
@@ -352,7 +430,7 @@
               <div class="feature-item">
                 <div class="feature-icon">⚡</div>
                 <div>
-                  <strong>Lightweight and private</strong>
+                  <strong>Lightweight, private & local</strong>
                   <p>Runs completely locally on your computer with zero external cloud calls. No message data ever leaves your device.</p>
                 </div>
               </div>
@@ -360,8 +438,16 @@
               <div class="feature-item">
                 <div class="feature-icon">🔍</div>
                 <div>
-                  <strong>Heuristic indicator extraction</strong>
-                  <p>In addition to raw probability scores, the scanner highlights manipulative phrasing such as artificial deadlines, spoofed verification forms, and suspicious link destinations.</p>
+                  <strong>Email Header Forensics & Spoof Detection</strong>
+                  <p>Inspects .EML headers for display name impersonation, Reply-To mismatches, and cryptographic SPF/DKIM verification results.</p>
+                </div>
+              </div>
+
+              <div class="feature-item">
+                <div class="feature-icon">🌐</div>
+                <div>
+                  <strong>Homoglyphs & Typosquatting Analysis</strong>
+                  <p>Detects Unicode confusable character attacks (e.g. Cyrillic lookalikes), Punycode encoding, and deceptive brand domain permutations.</p>
                 </div>
               </div>
             </div>
@@ -379,12 +465,12 @@
                 <p>Links asking you to "Verify your identity", "Reset password", or "Confirm billing information".</p>
               </div>
               <div class="signal-card">
-                <strong>Too Good to Be True</strong>
-                <p>Unsolicited lottery winnings, 1000% crypto returns, or inheritance claims.</p>
+                <strong>Header Impersonation</strong>
+                <p>Emails displaying reputable brand names while routed through unauthorized external domains.</p>
               </div>
               <div class="signal-card">
-                <strong>Deceptive Links</strong>
-                <p>Direct numeric IP addresses, uncommon web extensions (.xyz, .top), or URLs mimicking reputable brands.</p>
+                <strong>Deceptive Links & Lookalike Domains</strong>
+                <p>Direct numeric IP addresses, uncommon web extensions (.xyz, .top), homoglyphs, or domains mimicking reputable brands.</p>
               </div>
             </div>
           </div>
@@ -392,10 +478,33 @@
       </section>
     </main>
 
+    <!-- Scan History Slide-out Drawer -->
+    <div class="history-overlay hidden" id="historyOverlay">
+      <div class="history-drawer" id="historyDrawer" role="dialog" aria-modal="true" aria-label="Scan History">
+        <div class="history-drawer-header">
+          <div>
+            <h3 class="drawer-title">Scan History</h3>
+            <p class="drawer-subtitle" id="historyCountText">0 recent scans recorded</p>
+          </div>
+          <button class="drawer-close-btn" id="btnCloseHistory" aria-label="Close History">&times;</button>
+        </div>
+
+        <div class="history-actions-bar">
+          <button class="secondary-btn btn-xs" id="btnExportHistoryJson">Export JSON</button>
+          <button class="secondary-btn btn-xs" id="btnExportHistoryCsv">Export CSV</button>
+          <button class="text-btn text-danger btn-xs" id="btnClearHistory">Clear All</button>
+        </div>
+
+        <div class="history-list" id="historyList">
+          <div class="history-empty">No scan history recorded yet. Messages checked in this session will appear here.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Simple, Clean Footer -->
     <footer class="app-footer">
-      <div>InboxSentinel • Fast, local email & SMS safety inspection</div>
-      <div class="footer-meta">Model accuracy: 98.30% • Local inference</div>
+      <div>InboxSentinel • Fast, local email, SMS & EML safety inspection</div>
+      <div class="footer-meta">Model accuracy: 98.30% • Local inference • Forensics enabled</div>
     </footer>
   </div>
 

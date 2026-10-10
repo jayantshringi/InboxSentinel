@@ -95,12 +95,38 @@ def test_endpoints():
             assert data["summary"]["threat_count"] == 1
             print("✅ /api/batch passed: Total 3, Safe 2, Threat 1")
 
-        # 6. Static files check
+        # 6. EML Scan & Header Forensics Endpoint
+        eml_text = (
+            "From: \"Wells Fargo Alerts\" <security@wellsfarg0-account.xyz>\n"
+            "Reply-To: phish@collector.top\n"
+            "Subject: Urgent: Verify Account Status\n"
+            "Authentication-Results: spf=fail; dkim=fail\n\n"
+            "Your bank account is locked. Verify now at http://wellsfarg0.xyz/auth\n"
+        )
+        req_body = json.dumps({
+            "text": eml_text,
+            "mode": "eml"
+        }).encode("utf-8")
+        req = urllib.request.Request(f"{BASE_URL}/api/scan-eml", data=req_body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as res:
+            assert res.status == 200
+            data = json.loads(res.read().decode())
+            assert data["is_threat"] is True
+            assert data["is_eml"] is True
+            assert data["header_info"] is not None
+            assert len(data["header_alerts"]) > 0
+            assert len(data["highlight_spans"]) > 0
+            print("✅ /api/scan-eml (Header forensics & highlight spans) passed")
+
+        # 7. Static files check
         with urllib.request.urlopen(f"{BASE_URL}/index.html") as res:
             assert res.status == 200
             content = res.read().decode()
             assert "InboxSentinel" in content
-            print("✅ Static /index.html passed")
+            assert "Threat Heatmap" in content
+            assert "Email Header Forensics" in content
+            assert "Scan History" in content
+            print("✅ Static /index.html (with Heatmap & Forensics) passed")
 
         with urllib.request.urlopen(f"{BASE_URL}/style.css") as res:
             assert res.status == 200

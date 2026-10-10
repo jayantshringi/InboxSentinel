@@ -1,6 +1,7 @@
 /**
  * InboxSentinel Frontend Application Logic
- * Simple, Subtle, Humanized Email & SMS Safety Checker
+ * Enhanced with Threat Heatmap Highlighter, Email Header Forensics (.EML),
+ * and Local Scan History.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -9,20 +10,28 @@ document.addEventListener("DOMContentLoaded", () => {
     activeTab: "single",
     singleMode: "email",
     batchMode: "email",
+    viewMode: "editor", // "editor" | "heatmap"
     presets: [],
     batchResults: [],
     activeBatchFilter: "all",
+    scanHistory: loadHistoryFromStorage(),
+    lastScanResult: null,
   };
 
-  // DOM Elements - Navigation & Modes
+  // DOM Elements - Navigation & Header
   const navTabs = document.querySelectorAll(".nav-tab");
   const tabPanels = document.querySelectorAll(".tab-panel");
+  const btnToggleHistory = document.getElementById("btnToggleHistory");
+  const historyCountBadge = document.getElementById("historyCountBadge");
+
+  // DOM Elements - Mode Switcher
   const modeBtnEmail = document.getElementById("modeBtnEmail");
   const modeBtnSms = document.getElementById("modeBtnSms");
+  const modeBtnEml = document.getElementById("modeBtnEml");
   const batchModeEmail = document.getElementById("batchModeEmail");
   const batchModeSms = document.getElementById("batchModeSms");
 
-  // DOM Elements - Single Inspector Input
+  // DOM Elements - Single Inspector Input & Views
   const messageInput = document.getElementById("messageInput");
   const charCount = document.getElementById("charCount");
   const btnScan = document.getElementById("btnScan");
@@ -30,11 +39,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const scanSpinner = document.getElementById("scanSpinner");
   const btnClear = document.getElementById("btnClear");
   const btnPaste = document.getElementById("btnPaste");
+  const btnUploadSingle = document.getElementById("btnUploadSingle");
+  const singleFileInput = document.getElementById("singleFileInput");
   const presetChipsContainer = document.getElementById("presetChipsContainer");
   const inputCardTitle = document.getElementById("inputCardTitle");
   const inputCardDesc = document.getElementById("inputCardDesc");
 
-  // DOM Elements - Single Results Panel
+  // View Mode Switcher Elements
+  const btnViewEditor = document.getElementById("btnViewEditor");
+  const btnViewHeatmap = document.getElementById("btnViewHeatmap");
+  const heatmapBadge = document.getElementById("heatmapBadge");
+  const viewHint = document.getElementById("viewHint");
+  const editorContainer = document.getElementById("editorContainer");
+  const heatmapContainer = document.getElementById("heatmapContainer");
+  const heatmapBody = document.getElementById("heatmapBody");
+
+  // DOM Elements - Results Card
   const emptyState = document.getElementById("emptyState");
   const verdictContent = document.getElementById("verdictContent");
   const verdictBanner = document.getElementById("verdictBanner");
@@ -48,6 +68,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const warningBox = document.getElementById("warningBox");
   const warningText = document.getElementById("warningText");
   const forensicSummaryText = document.getElementById("forensicSummaryText");
+
+  // Header Forensics Elements
+  const headerForensicsCard = document.getElementById("headerForensicsCard");
+  const headerAuthPill = document.getElementById("headerAuthPill");
+  const metaFrom = document.getElementById("metaFrom");
+  const metaReplyTo = document.getElementById("metaReplyTo");
+  const rowReplyTo = document.getElementById("rowReplyTo");
+  const metaSubject = document.getElementById("metaSubject");
+  const headerAlertsContainer = document.getElementById("headerAlertsContainer");
+  const headerAlertsList = document.getElementById("headerAlertsList");
 
   // Indicator Containers
   const urgencyCount = document.getElementById("urgencyCount");
@@ -79,7 +109,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnExportCsv = document.getElementById("btnExportCsv");
   const btnExportJson = document.getElementById("btnExportJson");
 
-  // Sample batch test cases
+  // History Drawer Elements
+  const historyOverlay = document.getElementById("historyOverlay");
+  const btnCloseHistory = document.getElementById("btnCloseHistory");
+  const historyList = document.getElementById("historyList");
+  const historyCountText = document.getElementById("historyCountText");
+  const btnClearHistory = document.getElementById("btnClearHistory");
+  const btnExportHistoryJson = document.getElementById("btnExportHistoryJson");
+  const btnExportHistoryCsv = document.getElementById("btnExportHistoryCsv");
+
+  // Default Batch Sample Emails
   const DEFAULT_BATCH_SAMPLES = [
     "Hi John, please find attached the Q3 financial report. Let me know if you have any questions.",
     "Congratulations! You have been selected as a winner of $1,000,000 in our international lottery! Click here to claim.",
@@ -121,30 +160,37 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* --------------------------------------------------------------------------
-     2. DETECTION TYPE TOGGLE (EMAIL VS SMS)
+     2. DETECTION TYPE TOGGLE (EMAIL, SMS, EML)
      -------------------------------------------------------------------------- */
   modeBtnEmail.addEventListener("click", () => setSingleMode("email"));
   modeBtnSms.addEventListener("click", () => setSingleMode("sms"));
+  if (modeBtnEml) {
+    modeBtnEml.addEventListener("click", () => setSingleMode("eml"));
+  }
 
   function setSingleMode(mode) {
     state.singleMode = mode;
+    const modeButtons = [modeBtnEmail, modeBtnSms, modeBtnEml].filter(Boolean);
+    modeButtons.forEach((btn) => {
+      const isMatch = btn.getAttribute("data-mode") === mode;
+      btn.classList.toggle("active", isMatch);
+      btn.setAttribute("aria-checked", isMatch ? "true" : "false");
+    });
+
     if (mode === "email") {
-      modeBtnEmail.classList.add("active");
-      modeBtnEmail.setAttribute("aria-checked", "true");
-      modeBtnSms.classList.remove("active");
-      modeBtnSms.setAttribute("aria-checked", "false");
       inputCardTitle.textContent = "Email message content";
       inputCardDesc.textContent = "Paste the email subject or body to verify.";
       messageInput.placeholder = "Paste email subject and body text here to check for scams or spam...";
-    } else {
-      modeBtnSms.classList.add("active");
-      modeBtnSms.setAttribute("aria-checked", "true");
-      modeBtnEmail.classList.remove("active");
-      modeBtnEmail.setAttribute("aria-checked", "false");
+    } else if (mode === "sms") {
       inputCardTitle.textContent = "SMS / Text message content";
-      inputCardDesc.textContent = "Paste short SMS messages, delivery texts, or lottery notifications.";
+      inputCardDesc.textContent = "Paste short SMS messages, delivery texts, or prize alerts.";
       messageInput.placeholder = "Paste SMS text (e.g., postal delivery alert, bank verification text) here...";
+    } else if (mode === "eml") {
+      inputCardTitle.textContent = ".EML Email with Headers";
+      inputCardDesc.textContent = "Inspect raw RFC 822 email headers, sender SPF/DKIM, and body.";
+      messageInput.placeholder = "Paste raw .eml text with headers (From:, Subject:, Date:) or drop a .eml file...";
     }
+
     renderPresetChips();
   }
 
@@ -161,11 +207,41 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   /* --------------------------------------------------------------------------
-     3. TEXTAREA INTERACTIONS & CHARACTER COUNT
+     3. VIEW MODE TOGGLE (EDITOR VS HEATMAP)
+     -------------------------------------------------------------------------- */
+  btnViewEditor.addEventListener("click", () => setViewMode("editor"));
+  btnViewHeatmap.addEventListener("click", () => setViewMode("heatmap"));
+
+  function setViewMode(mode) {
+    state.viewMode = mode;
+    if (mode === "editor") {
+      btnViewEditor.classList.add("active");
+      btnViewHeatmap.classList.remove("active");
+      editorContainer.classList.remove("hidden");
+      heatmapContainer.classList.add("hidden");
+      viewHint.textContent = "Live text editor";
+    } else {
+      btnViewHeatmap.classList.add("active");
+      btnViewEditor.classList.remove("active");
+      editorContainer.classList.add("hidden");
+      heatmapContainer.classList.remove("hidden");
+      viewHint.textContent = "Highlighted threat tokens";
+    }
+  }
+
+  /* --------------------------------------------------------------------------
+     4. FILE UPLOADS & TEXTAREA INTERACTIONS
      -------------------------------------------------------------------------- */
   messageInput.addEventListener("input", () => {
-    const len = messageInput.value.length;
-    charCount.textContent = `${len.toLocaleString()} character${len === 1 ? "" : "s"}`;
+    const text = messageInput.value;
+    charCount.textContent = `${text.length.toLocaleString()} character${text.length === 1 ? "" : "s"}`;
+
+    // Auto-detect EML headers if pasted
+    if (state.singleMode !== "eml" && text.length > 30) {
+      if (text.startsWith("From: ") || (text.includes("\nFrom: ") && text.includes("\nSubject: "))) {
+        setSingleMode("eml");
+      }
+    }
   });
 
   btnClear.addEventListener("click", () => {
@@ -173,6 +249,9 @@ document.addEventListener("DOMContentLoaded", () => {
     charCount.textContent = "0 characters";
     messageInput.focus();
     resetVerdict();
+    setViewMode("editor");
+    btnViewHeatmap.disabled = true;
+    heatmapBadge.classList.add("hidden");
   });
 
   btnPaste.addEventListener("click", async () => {
@@ -181,10 +260,54 @@ document.addEventListener("DOMContentLoaded", () => {
       messageInput.value = text;
       charCount.textContent = `${text.length.toLocaleString()} characters`;
       messageInput.focus();
+      if (text.startsWith("From: ") || (text.includes("\nFrom: ") && text.includes("\nSubject: "))) {
+        setSingleMode("eml");
+      }
     } catch {
       alert("Please paste directly into the box using Ctrl+V.");
     }
   });
+
+  // Single file upload button & drop on textarea
+  btnUploadSingle.addEventListener("click", () => singleFileInput.click());
+
+  singleFileInput.addEventListener("change", (e) => {
+    if (e.target.files.length > 0) {
+      handleSingleUploadFile(e.target.files[0]);
+    }
+  });
+
+  messageInput.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    messageInput.style.borderColor = "var(--border-focus)";
+  });
+
+  messageInput.addEventListener("dragleave", () => {
+    messageInput.style.borderColor = "";
+  });
+
+  messageInput.addEventListener("drop", (e) => {
+    e.preventDefault();
+    messageInput.style.borderColor = "";
+    if (e.dataTransfer.files.length > 0) {
+      handleSingleUploadFile(e.dataTransfer.files[0]);
+    }
+  });
+
+  function handleSingleUploadFile(file) {
+    const isEml = file.name.toLowerCase().endsWith(".eml") || file.name.toLowerCase().endsWith(".msg");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target.result;
+      messageInput.value = content;
+      charCount.textContent = `${content.length.toLocaleString()} characters`;
+      if (isEml) {
+        setSingleMode("eml");
+      }
+      runScan();
+    };
+    reader.readAsText(file);
+  }
 
   messageInput.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -196,7 +319,7 @@ document.addEventListener("DOMContentLoaded", () => {
   btnScan.addEventListener("click", runScan);
 
   /* --------------------------------------------------------------------------
-     4. PRESETS FETCH & RENDER
+     5. PRESETS FETCH & RENDER
      -------------------------------------------------------------------------- */
   async function loadPresets() {
     try {
@@ -235,7 +358,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* --------------------------------------------------------------------------
-     5. SCAN EXECUTION (API CALL)
+     6. SCAN EXECUTION (API CALL)
      -------------------------------------------------------------------------- */
   async function runScan() {
     const text = messageInput.value.trim();
@@ -259,7 +382,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const result = await res.json();
-      renderVerdict(result);
+      state.lastScanResult = result;
+      renderVerdict(result, text);
+      saveScanToHistory(result, text);
     } catch (err) {
       alert(`Error checking message: ${err.message}`);
     } finally {
@@ -284,14 +409,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* --------------------------------------------------------------------------
-     6. VERDICT RENDERING
+     7. VERDICT RENDERING & HEATMAP GENERATION
      -------------------------------------------------------------------------- */
   function resetVerdict() {
     emptyState.classList.remove("hidden");
     verdictContent.classList.add("hidden");
+    if (headerForensicsCard) headerForensicsCard.classList.add("hidden");
   }
 
-  function renderVerdict(result) {
+  function renderVerdict(result, rawText) {
     emptyState.classList.add("hidden");
     verdictContent.classList.remove("hidden");
 
@@ -302,11 +428,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // Friendly Banner
     verdictBanner.className = `verdict-callout ${isThreat ? "threat" : "safe"}`;
     verdictTitle.textContent = isThreat
-      ? "Suspicious message detected"
+      ? "Suspicious threat detected"
       : "Looks safe";
     verdictClassification.textContent = isThreat
-      ? "This message shows strong patterns typical of spam or phishing scams."
-      : "No obvious signs of spam or malicious phishing were detected.";
+      ? "This message displays manipulative urgency, phishing traps, or header spoofing."
+      : "No obvious signs of spam, phishing traps, or spoofing detected.";
 
     // Icon update
     if (verdictIconSvg) {
@@ -336,6 +462,9 @@ document.addEventListener("DOMContentLoaded", () => {
     heuristicRiskPill.textContent = riskTitles[riskLevel] || "Evaluated";
     heuristicRiskPill.className = `risk-badge ${riskLevel}`;
 
+    // Header Forensics Card
+    renderHeaderForensics(result);
+
     // Warning
     if (result.warning) {
       warningBox.classList.remove("hidden");
@@ -352,6 +481,100 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Summary Text
     forensicSummaryText.textContent = indicators.summary || "No threat markers identified.";
+
+    // Render Threat Heatmap Highlighting
+    const spans = result.highlight_spans || [];
+    renderHeatmap(rawText, spans);
+
+    // Enable Threat Heatmap Tab
+    btnViewHeatmap.disabled = false;
+    if (spans.length > 0) {
+      heatmapBadge.textContent = spans.length;
+      heatmapBadge.classList.remove("hidden");
+    } else {
+      heatmapBadge.classList.add("hidden");
+    }
+  }
+
+  function renderHeaderForensics(result) {
+    if (!headerForensicsCard) return;
+
+    const hi = result.header_info;
+    const alerts = result.header_alerts || [];
+
+    if (!hi && alerts.length === 0) {
+      headerForensicsCard.classList.add("hidden");
+      return;
+    }
+
+    headerForensicsCard.classList.remove("hidden");
+    metaFrom.textContent = hi && hi.from_raw ? hi.from_raw : "Not specified in header";
+    metaSubject.textContent = hi && hi.subject ? hi.subject : "(No subject header)";
+
+    if (hi && hi.reply_to) {
+      rowReplyTo.style.display = "flex";
+      metaReplyTo.textContent = hi.reply_to;
+    } else {
+      rowReplyTo.style.display = "none";
+    }
+
+    // Authentication Pill
+    if (alerts.length > 0) {
+      headerAuthPill.textContent = "Security Flagged";
+      headerAuthPill.className = "auth-pill auth-fail";
+    } else {
+      headerAuthPill.textContent = "Headers Clean";
+      headerAuthPill.className = "auth-pill auth-pass";
+    }
+
+    // Alerts List
+    if (alerts.length > 0) {
+      headerAlertsContainer.classList.remove("hidden");
+      headerAlertsList.innerHTML = "";
+      alerts.forEach((alert) => {
+        const item = document.createElement("div");
+        item.className = "alert-badge-item";
+        item.innerHTML = `
+          <span class="alert-severity-tag">${alert.severity || "FLAG"}</span>
+          <span>${escapeHtml(alert.message)}</span>
+        `;
+        headerAlertsList.appendChild(item);
+      });
+    } else {
+      headerAlertsContainer.classList.add("hidden");
+      headerAlertsList.innerHTML = "";
+    }
+  }
+
+  function renderHeatmap(text, spans) {
+    if (!text || spans.length === 0) {
+      heatmapBody.innerHTML = escapeHtml(text || "No text available");
+      return;
+    }
+
+    let html = "";
+    let lastIdx = 0;
+
+    spans.forEach((span) => {
+      // Non-highlighted text before this span
+      if (span.start > lastIdx) {
+        html += escapeHtml(text.substring(lastIdx, span.start));
+      }
+
+      // Highlighted token
+      const tokenText = text.substring(span.start, span.end);
+      const categoryClass = `threat-${span.category || "urgency"}`;
+      html += `<mark class="threat-mark ${categoryClass}" title="${escapeHtml(span.label || "Threat Trigger")}: ${escapeHtml(tokenText)}">${escapeHtml(tokenText)}</mark>`;
+
+      lastIdx = span.end;
+    });
+
+    // Remaining text after last span
+    if (lastIdx < text.length) {
+      html += escapeHtml(text.substring(lastIdx));
+    }
+
+    heatmapBody.innerHTML = html;
   }
 
   function renderIndicatorTags(countEl, containerEl, list, tagClass) {
@@ -392,13 +615,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* --------------------------------------------------------------------------
-     7. BATCH SCANNER
+     8. BATCH SCANNER
      -------------------------------------------------------------------------- */
   btnLoadTestBatch.addEventListener("click", () => {
     batchTextInput.value = DEFAULT_BATCH_SAMPLES.join("\n");
   });
 
-  // Drag and drop handling
   fileDropzone.addEventListener("click", () => batchFileInput.click());
 
   fileDropzone.addEventListener("dragover", (e) => {
@@ -487,7 +709,6 @@ document.addEventListener("DOMContentLoaded", () => {
     countFilterSafe.textContent = summary.safe_count;
   }
 
-  // Filter Buttons
   filterBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       filterBtns.forEach((b) => b.classList.remove("active"));
@@ -537,28 +758,155 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function inspectSingleFromBatch(text) {
-    // Switch to single tab
     const singleTab = document.getElementById("tabBtnSingle");
     if (singleTab) singleTab.click();
 
-    // Populate and run scan
     messageInput.value = text;
     charCount.textContent = `${text.length.toLocaleString()} characters`;
     runScan();
   }
 
-  function escapeHtml(str) {
-    if (!str) return "";
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  /* --------------------------------------------------------------------------
+     9. SCAN HISTORY DRAWER (LOCAL STORAGE)
+     -------------------------------------------------------------------------- */
+  function loadHistoryFromStorage() {
+    try {
+      const stored = localStorage.getItem("inbox_sentinel_history");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
   }
 
+  function saveHistoryToStorage(history) {
+    try {
+      localStorage.setItem("inbox_sentinel_history", JSON.stringify(history));
+    } catch (e) {
+      console.warn("Storage full or unavailable:", e);
+    }
+  }
+
+  function saveScanToHistory(result, rawText) {
+    const entry = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      date: new Date().toLocaleDateString(),
+      text: rawText,
+      preview: rawText.substring(0, 140) + (rawText.length > 140 ? "..." : ""),
+      is_threat: result.is_threat,
+      confidence: Math.round(result.confidence || 0),
+      mode: result.mode || state.singleMode,
+      signals: (result.indicators && result.indicators.indicator_score) || 0
+    };
+
+    // Prepend and limit to 40 recent items
+    state.scanHistory.unshift(entry);
+    if (state.scanHistory.length > 40) {
+      state.scanHistory.pop();
+    }
+    saveHistoryToStorage(state.scanHistory);
+    updateHistoryBadge();
+  }
+
+  function updateHistoryBadge() {
+    const count = state.scanHistory.length;
+    if (historyCountBadge) historyCountBadge.textContent = count;
+    if (historyCountText) historyCountText.textContent = `${count} scan${count === 1 ? "" : "s"} logged in history`;
+  }
+
+  function renderHistoryDrawer() {
+    updateHistoryBadge();
+    historyList.innerHTML = "";
+
+    if (state.scanHistory.length === 0) {
+      historyList.innerHTML = `<div class="history-empty">No scan history recorded yet. Messages checked in this session will appear here.</div>`;
+      return;
+    }
+
+    state.scanHistory.forEach((item) => {
+      const div = document.createElement("div");
+      div.className = "history-item";
+
+      const verdictClass = item.is_threat ? "history-verdict-threat" : "history-verdict-safe";
+      const verdictLabel = item.is_threat ? "Threat" : "Safe";
+
+      div.innerHTML = `
+        <div class="history-item-top">
+          <span class="history-verdict-pill ${verdictClass}">${verdictLabel}</span>
+          <span class="history-timestamp">${item.date} ${item.timestamp}</span>
+        </div>
+        <div class="history-item-preview">${escapeHtml(item.preview)}</div>
+        <div class="history-item-footer">
+          <span>Mode: ${item.mode.toUpperCase()}</span>
+          <span><strong>${item.confidence}%</strong> confidence</span>
+        </div>
+      `;
+
+      div.addEventListener("click", () => {
+        // Load into inspector
+        messageInput.value = item.text;
+        charCount.textContent = `${item.text.length.toLocaleString()} characters`;
+        setSingleMode(item.mode || "email");
+        closeHistoryDrawer();
+        const singleTab = document.getElementById("tabBtnSingle");
+        if (singleTab) singleTab.click();
+        runScan();
+      });
+
+      historyList.appendChild(div);
+    });
+  }
+
+  function openHistoryDrawer() {
+    renderHistoryDrawer();
+    historyOverlay.classList.remove("hidden");
+  }
+
+  function closeHistoryDrawer() {
+    historyOverlay.classList.add("hidden");
+  }
+
+  btnToggleHistory.addEventListener("click", openHistoryDrawer);
+  btnCloseHistory.addEventListener("click", closeHistoryDrawer);
+  historyOverlay.addEventListener("click", (e) => {
+    if (e.target === historyOverlay) {
+      closeHistoryDrawer();
+    }
+  });
+
+  btnClearHistory.addEventListener("click", () => {
+    if (confirm("Are you sure you want to clear your local scan history?")) {
+      state.scanHistory = [];
+      saveHistoryToStorage([]);
+      renderHistoryDrawer();
+    }
+  });
+
+  btnExportHistoryJson.addEventListener("click", () => {
+    if (state.scanHistory.length === 0) {
+      alert("No history to export.");
+      return;
+    }
+    const jsonStr = JSON.stringify(state.scanHistory, null, 2);
+    downloadFile(jsonStr, "inbox_sentinel_history.json", "application/json");
+  });
+
+  btnExportHistoryCsv.addEventListener("click", () => {
+    if (state.scanHistory.length === 0) {
+      alert("No history to export.");
+      return;
+    }
+    let csv = "ID,Date,Time,Mode,Verdict,Confidence,Message\n";
+    state.scanHistory.forEach((h) => {
+      const status = h.is_threat ? "Suspicious" : "Safe";
+      const cleanMsg = `"${h.text.replace(/"/g, '""')}"`;
+      csv += `${h.id},${h.date},${h.timestamp},${h.mode},${status},${h.confidence},${cleanMsg}\n`;
+    });
+    downloadFile(csv, "inbox_sentinel_history.csv", "text/csv");
+  });
+
   /* --------------------------------------------------------------------------
-     8. EXPORT CSV & JSON
+     10. EXPORT BATCH CSV & JSON
      -------------------------------------------------------------------------- */
   btnExportJson.addEventListener("click", () => {
     if (state.batchResults.length === 0) {
@@ -595,6 +943,17 @@ document.addEventListener("DOMContentLoaded", () => {
     URL.revokeObjectURL(url);
   }
 
+  function escapeHtml(str) {
+    if (!str) return "";
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
   // Initialize
+  updateHistoryBadge();
   loadPresets();
 });
